@@ -13,6 +13,21 @@ enum UserStatus {
   DELETING
 }
 
+enum RefreshFamilyStatus {
+  ACTIVE
+  LOGGED_OUT
+  COMPROMISED
+}
+
+enum TokenRevokeReason {
+  ROTATED
+  EXPIRED
+  LOGOUT
+  FAMILY_REVOKED
+  REUSE_DETECTED
+  USER_DISABLED
+}
+
 enum SessionStatus {
   DRAFT
   IN_REVIEW
@@ -93,6 +108,7 @@ model User {
   createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
   refreshSessions   RefreshSession[]
+  refreshFamilies   RefreshFamily[]
   practiceSessions  PracticeSession[]
   mediaAssets       MediaAsset[]
   annotations       Annotation[]
@@ -104,21 +120,43 @@ model User {
   @@map("users")
 }
 
+model RefreshFamily {
+  id            String                @id @default(uuid()) @db.Uuid
+  userId        String                @map("user_id") @db.Uuid
+  status        RefreshFamilyStatus   @default(ACTIVE)
+  revokeReason  TokenRevokeReason?    @map("revoke_reason")
+  revokedAt     DateTime?             @map("revoked_at") @db.Timestamptz(6)
+  lastRotatedAt DateTime              @default(now()) @map("last_rotated_at") @db.Timestamptz(6)
+  lastIpHash    String?               @map("last_ip_hash") @db.Char(64)
+  lastUserAgent String?               @map("last_user_agent") @db.VarChar(500)
+  createdAt     DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions      RefreshSession[]
+
+  @@index([userId, status])
+  @@index([lastRotatedAt])
+  @@map("refresh_families")
+}
+
 model RefreshSession {
-  id         String    @id @default(uuid()) @db.Uuid
-  userId     String    @map("user_id") @db.Uuid
-  familyId   String    @map("family_id") @db.Uuid
-  tokenHash  String    @unique @map("token_hash") @db.Char(64)
-  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
-  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
-  replacedBy String?   @map("replaced_by") @db.Uuid
-  ipHash     String?   @map("ip_hash") @db.Char(64)
-  userAgent  String?   @map("user_agent") @db.VarChar(500)
-  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String             @id @default(uuid()) @db.Uuid
+  userId       String             @map("user_id") @db.Uuid
+  familyId     String             @map("family_id") @db.Uuid
+  tokenHash    String             @unique @map("token_hash") @db.Char(64)
+  expiresAt    DateTime           @map("expires_at") @db.Timestamptz(6)
+  revokedAt    DateTime?          @map("revoked_at") @db.Timestamptz(6)
+  revokeReason TokenRevokeReason? @map("revoke_reason")
+  replacedBy   String?            @map("replaced_by") @db.Uuid
+  ipHash       String?            @map("ip_hash") @db.Char(64)
+  userAgent    String?            @map("user_agent") @db.VarChar(500)
+  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  family       RefreshFamily      @relation(fields: [familyId], references: [id], onDelete: Cascade)
 
   @@index([userId, familyId])
+  @@index([familyId, revokedAt])
   @@index([expiresAt])
   @@map("refresh_sessions")
 }

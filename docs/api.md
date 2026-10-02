@@ -21,10 +21,20 @@
 |---|---|---|
 | POST | `/auth/register` | 注册并返回 Access Token，同时设置 Refresh Cookie |
 | POST | `/auth/login` | 登录并轮换 Refresh Cookie |
-| POST | `/auth/refresh` | 使用 Cookie 轮换刷新令牌 |
-| POST | `/auth/logout` | 撤销当前 Refresh Session 并清除 Cookie |
+| POST | `/auth/refresh` | 使用 Cookie 轮换刷新令牌（并发请求安全） |
+| POST | `/auth/logout` | 撤销当前会话族（本设备）并清除 Cookie |
+| GET | `/auth/sessions` | 列出账户的会话族（登录设备），`current` 标记当前设备 |
+| POST | `/auth/sessions/:familyId/revoke` | 让指定设备退出（只撤销该会话族） |
 
 Refresh Cookie 路径为 `/api/v1/auth`，生产环境在 HTTPS 下自动使用 `Secure`。
+
+### 刷新令牌轮换与重放处置
+
+- 每次登录创建一个**会话族**（`refresh_families`，状态为 `ACTIVE / LOGGED_OUT / COMPROMISED`），族内刷新令牌单次使用、每次请求轮换。
+- `/auth/refresh` 在数据库事务内对会话族行加行锁（`SELECT … FOR UPDATE`），并发请求串行处理，不会互相撤销。
+- **良性并发**：同一张令牌在轮换后的宽限窗（`REFRESH_ROTATION_GRACE_MS`，默认 30 秒）内、由相同 IP/UA 再次提交时，只补发 Access Token，不重复轮换、不判复用。
+- **重放攻击**：超出宽限窗、IP/UA 指纹不符，或后继令牌已继续轮换，则把**该会话族**标记为 `COMPROMISED` 并撤销族内全部令牌，返回 `SESSION_COMPROMISED`；用户的其他登录族不受影响。
+- **旧设备退出**：`/auth/logout` 与按族撤销只影响单个会话族，旧设备之后的迟到请求得到 `AUTH_REQUIRED`，不会触发失陷扩大化；修改密码才撤销全部会话族。
 
 ## 用户与设置
 

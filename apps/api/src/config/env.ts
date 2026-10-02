@@ -14,6 +14,8 @@ const envSchema = z.object({
   REFRESH_TOKEN_PEPPER: z.string().min(32),
   ACCESS_TOKEN_TTL: z.string().default("15m"),
   REFRESH_TOKEN_TTL: z.string().default("30d"),
+  // 并发刷新宽限窗：同一令牌在被轮换后的此时长内，由相同 IP/UA 再次提交视为良性并发
+  REFRESH_ROTATION_GRACE_MS: z.coerce.number().int().min(0).max(300_000).default(30_000),
   S3_ENDPOINT: z.string().url(),
   S3_PUBLIC_ENDPOINT: z.string().url().optional(),
   S3_REGION: z.string().min(1).default("us-east-1"),

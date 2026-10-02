@@ -5,6 +5,7 @@ import { AppError } from "../lib/errors.js";
 import { hashPassword, verifyPassword } from "../lib/security.js";
 import { prisma } from "../lib/prisma.js";
 import { audit } from "../lib/audit.js";
+import { revokeAllFamilies } from "../services/auth-service.js";
 
 const selectUser = {
   id: true,
@@ -51,10 +52,11 @@ const userRoutes: FastifyPluginAsync = async (app) => {
     if (!user || !(await verifyPassword(user.passwordHash, input.currentPassword))) {
       throw new AppError(400, "CURRENT_PASSWORD_INVALID", "当前密码不正确");
     }
-    await prisma.$transaction([
-      prisma.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(input.newPassword) } }),
-      prisma.refreshSession.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date() } }),
-    ]);
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(input.newPassword) } });
+      // 改密属于"退出全部登录"：撤销该用户的所有会话族
+      await revokeAllFamilies(tx, user.id);
+    });
     await audit(request, "USER_PASSWORD_CHANGED", "USER", user.id, "SUCCESS");
     return { success: true, message: "密码已更新，请重新登录" };
   });

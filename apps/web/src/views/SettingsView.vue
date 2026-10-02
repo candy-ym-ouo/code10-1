@@ -10,6 +10,26 @@ const message = ref("");
 const error = ref("");
 const loading = ref(true);
 
+interface DeviceSession {
+  id: string;
+  status: "ACTIVE" | "LOGGED_OUT" | "COMPROMISED";
+  revokeReason: string | null;
+  current: boolean;
+  userAgent: string | null;
+  lastRotatedAt: string;
+  createdAt: string;
+  revokedAt: string | null;
+}
+const devices = ref<DeviceSession[]>([]);
+const devicesLoading = ref(false);
+const deviceError = ref("");
+
+const statusLabel: Record<DeviceSession["status"], string> = {
+  ACTIVE: "使用中",
+  LOGGED_OUT: "已退出",
+  COMPROMISED: "已撤销（检测到复用）",
+};
+
 async function load(): Promise<void> {
   try {
     const result = await apiFetch<{ user: User }>("/api/v1/users/me");
@@ -63,7 +83,38 @@ async function exportData(): Promise<void> {
   const result = await apiFetch<{ export: { id: string } }>("/api/v1/exports", { method: "POST", body: JSON.stringify({ format: "json" }) });
   message.value = `导出任务 ${result.export.id} 已创建，请稍后刷新状态。`;
 }
+async function loadDevices(): Promise<void> {
+  devicesLoading.value = true;
+  deviceError.value = "";
+  try {
+    const result = await apiFetch<{ sessions: DeviceSession[] }>("/api/v1/auth/sessions");
+    devices.value = result.sessions;
+  } catch (reason) {
+    deviceError.value = reason instanceof ApiError ? reason.message : "登录设备加载失败";
+  } finally {
+    devicesLoading.value = false;
+  }
+}
+async function revokeDevice(device: DeviceSession): Promise<void> {
+  const label = device.userAgent ? `设备「${device.userAgent.slice(0, 60)}」` : "该设备";
+  if (!window.confirm(device.current ? "确定退出当前设备吗？需要重新登录。" : `确定让${label}退出登录吗？不会影响当前设备。`)) return;
+  try {
+    await apiFetch(`/api/v1/auth/sessions/${device.id}/revoke`, { method: "POST", body: "{}" });
+    if (device.current) {
+      await auth.logout();
+      window.location.href = "/login";
+      return;
+    }
+    await loadDevices();
+  } catch (reason) {
+    deviceError.value = reason instanceof ApiError ? reason.message : "撤销失败";
+  }
+}
+function formatTime(value: string): string {
+  return new Date(value).toLocaleString("zh-CN", { dateStyle: "medium", timeStyle: "short" });
+}
 onMounted(load);
+onMounted(loadDevices);
 </script>
 
 <template>
@@ -90,6 +141,28 @@ onMounted(load);
         <label class="field"><span>确认新密码</span><input v-model="passwords.confirmPassword" required type="password" autocomplete="new-password" /></label>
         <div class="row end"><button class="button secondary" type="submit">修改密码</button></div>
       </form>
+
+      <article class="card stack">
+        <h2>登录设备</h2>
+        <p class="muted">一次登录对应一个会话族。让旧设备退出只会撤销该设备，不影响当前登录；系统检测到令牌复用时也仅会撤销对应设备。</p>
+        <div v-if="deviceError" class="alert">{{ deviceError }}</div>
+        <div v-if="devicesLoading" class="loading">正在加载登录设备…</div>
+        <ul v-else class="device-list">
+          <li v-for="device in devices" :key="device.id" class="device-item">
+            <div class="device-meta">
+              <strong>{{ device.userAgent || "未知设备" }}<span v-if="device.current" class="device-current">当前设备</span></strong>
+              <span class="muted">状态：{{ statusLabel[device.status] }} · 最近轮换：{{ formatTime(device.lastRotatedAt) }}</span>
+              <span v-if="device.revokedAt" class="muted">退出时间：{{ formatTime(device.revokedAt) }}</span>
+            </div>
+            <button
+              v-if="device.status === 'ACTIVE'"
+              class="button secondary"
+              type="button"
+              @click="revokeDevice(device)"
+            >{{ device.current ? "退出当前设备" : "让该设备退出" }}</button>
+          </li>
+        </ul>
+      </article>
 
       <article class="card stack">
         <h2>数据导出</h2>
