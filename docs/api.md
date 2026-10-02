@@ -20,11 +20,21 @@
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | POST | `/auth/register` | 注册并返回 Access Token，同时设置 Refresh Cookie |
-| POST | `/auth/login` | 登录并轮换 Refresh Cookie |
-| POST | `/auth/refresh` | 使用 Cookie 轮换刷新令牌 |
-| POST | `/auth/logout` | 撤销当前 Refresh Session 并清除 Cookie |
+| POST | `/auth/login` | 登录并创建新的会话族（Refresh Family），设置 Refresh Cookie |
+| POST | `/auth/refresh` | 原子轮换刷新令牌；并发竞争返回 `409 REFRESH_CONFLICT`，可退避重试 |
+| POST | `/auth/logout` | 退出当前会话族（仅本设备）并清除 Cookie |
+| GET | `/auth/sessions` | 列出当前账户的登录设备（会话族） |
+| DELETE | `/auth/sessions/:familyId` | 远程退出指定设备，只撤销该会话族 |
 
 Refresh Cookie 路径为 `/api/v1/auth`，生产环境在 HTTPS 下自动使用 `Secure`。
+
+### 刷新令牌轮换与重放处置
+
+每次登录创建一个**会话族**（`refresh_families`），族内的刷新令牌单向轮换（旧令牌 `replaced_by` 新令牌）：
+
+- 轮换通过单条 `UPDATE ... WHERE revoked_at IS NULL` 原子认领，同一令牌的并发请求只有一个成功；落标请求若发生在 `REFRESH_ROTATION_GRACE_MS`（默认 30s）宽限窗口内，返回 `409 REFRESH_CONFLICT`（不清 Cookie，客户端退避重试即可），不会互相撤销。
+- 已轮换令牌在宽限窗口外再次出现，或已标记重放的令牌再次出现，视为**令牌被盗用**：仅将所属会话族熔断为 `COMPROMISED` 并撤销族内令牌，写 `AUTH_REFRESH_REUSE` 审计，返回 `401 SESSION_REVOKED`。其他登录（其他会话族）不受影响。
+- `logout`、远程退出、改密只影响目标会话族（改密影响该用户全部族）；正常退出的族状态为 `LOGGED_OUT`，与盗用熔断区分。
 
 ## 用户与设置
 

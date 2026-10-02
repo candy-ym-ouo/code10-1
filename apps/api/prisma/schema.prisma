@@ -13,6 +13,12 @@ enum UserStatus {
   DELETING
 }
 
+enum RefreshFamilyStatus {
+  ACTIVE
+  LOGGED_OUT
+  COMPROMISED
+}
+
 enum SessionStatus {
   DRAFT
   IN_REVIEW
@@ -92,6 +98,7 @@ model User {
   status            UserStatus       @default(ACTIVE)
   createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  refreshFamilies   RefreshFamily[]
   refreshSessions   RefreshSession[]
   practiceSessions  PracticeSession[]
   mediaAssets       MediaAsset[]
@@ -104,6 +111,23 @@ model User {
   @@map("users")
 }
 
+model RefreshFamily {
+  id           String                @id @default(uuid()) @db.Uuid
+  userId       String                @map("user_id") @db.Uuid
+  status       RefreshFamilyStatus   @default(ACTIVE)
+  lastRotatedAt DateTime?             @map("last_rotated_at") @db.Timestamptz(6)
+  revokedAt    DateTime?             @map("revoked_at") @db.Timestamptz(6)
+  revokeReason String?               @map("revoke_reason") @db.VarChar(40)
+  compromiseDetectedAt DateTime?     @map("compromise_detected_at") @db.Timestamptz(6)
+  createdAt    DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user         User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions     RefreshSession[]
+
+  @@index([userId, status])
+  @@map("refresh_families")
+}
+
 model RefreshSession {
   id         String    @id @default(uuid()) @db.Uuid
   userId     String    @map("user_id") @db.Uuid
@@ -112,11 +136,13 @@ model RefreshSession {
   expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
   revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
   replacedBy String?   @map("replaced_by") @db.Uuid
+  replayedAt DateTime? @map("replayed_at") @db.Timestamptz(6)
   ipHash     String?   @map("ip_hash") @db.Char(64)
   userAgent  String?   @map("user_agent") @db.VarChar(500)
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  family     RefreshFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
 
   @@index([userId, familyId])
   @@index([expiresAt])

@@ -9,10 +9,11 @@ export async function audit(
   resourceId: string | null,
   result: "SUCCESS" | "FAILURE",
   metadata?: Record<string, unknown>,
+  userId?: string | null,
 ): Promise<void> {
   await prisma.auditLog.create({
     data: {
-      userId: request.authUser?.id ?? null,
+      userId: userId ?? request.authUser?.id ?? null,
       action,
       resource,
       resourceId,

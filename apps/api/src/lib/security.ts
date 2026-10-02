@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import argon2 from "argon2";
 import jsonwebtoken from "jsonwebtoken";
 import { getConfig } from "../config/env.js";
@@ -42,9 +42,9 @@ export function verifyAccessToken(token: string): AccessClaims {
   return { sub: decoded.sub, email: String(decoded.email), tokenType: "access" };
 }
 
-export function createRefreshToken(): { raw: string; hash: string; familyId: string } {
+export function createRefreshToken(): { raw: string; hash: string } {
   const raw = randomBytes(48).toString("base64url");
-  return { raw, hash: hashRefreshToken(raw), familyId: randomUUID() };
+  return { raw, hash: hashRefreshToken(raw) };
 }
 
 export function hashRefreshToken(raw: string): string {

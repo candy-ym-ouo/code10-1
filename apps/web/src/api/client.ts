@@ -16,26 +16,39 @@ export function setAccessToken(value: string | null): void {
   accessToken = value;
 }
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
+ * 轮换刷新令牌。并发请求通过 refreshPromise 合并；
+ * 服务端在极窄竞争窗口返回 409 REFRESH_CONFLICT 时做指数退避重试
+ * （此时获胜请求已种下新 Cookie，重试会成功）。
+ */
 async function refreshAccessToken(): Promise<boolean> {
   if (!refreshPromise) {
-    refreshPromise = fetch("/api/v1/auth/refresh", {
-      method: "POST",
-      credentials: "include",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-    })
-      .then(async (response) => {
-        if (!response.ok) return false;
-        const data = (await response.json()) as { accessToken?: string };
-        accessToken = data.accessToken ?? null;
-        return Boolean(accessToken);
-      })
-      .catch(() => false)
-      .finally(() => {
-        refreshPromise = null;
-      });
+    refreshPromise = doRefresh().finally(() => {
+      refreshPromise = null;
+    });
   }
   return refreshPromise;
+}
+
+async function doRefresh(attempt = 0): Promise<boolean> {
+  const response = await fetch("/api/v1/auth/refresh", {
+    method: "POST",
+    credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  if (response.ok) {
+    const data = (await response.json()) as { accessToken?: string };
+    accessToken = data.accessToken ?? null;
+    return Boolean(accessToken);
+  }
+  if (response.status === 409 && attempt < 3) {
+    await sleep(200 * 2 ** attempt);
+    return doRefresh(attempt + 1);
+  }
+  return false;
 }
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}, retry = true): Promise<T> {

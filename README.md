@@ -93,7 +93,8 @@ npm run test:e2e
 ## 数据与安全
 
 - 密码使用 Argon2id；Access Token 只在浏览器内存保存。
-- Refresh Token 使用 `HttpOnly` Cookie 并每次轮换；检测到复用会撤销同一会话族。
+- Refresh Token 使用 `HttpOnly` Cookie 并原子轮换；并发请求在宽限窗口内返回 `409` 由客户端退避重试，不会互相撤销。
+- 每次登录是独立会话族：检测到令牌重放只熔断该族（其他设备不受影响）；支持单设备退出与远程退出。
 - 音频 Bucket 保持私有，播放 URL 默认 300 秒过期。
 - 上传先创建 `MediaAsset`，对象直传 S3/MinIO，确认时流式计算 SHA-256。
 - 同一用户重复上传相同 SHA-256 时复用已有对象，新练习只创建业务关联，不重复占用存储。

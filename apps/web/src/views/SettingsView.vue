@@ -2,6 +2,19 @@
 import { onMounted, reactive, ref } from "vue";
 import { apiFetch, ApiError } from "../api/client.js";
 import { useAuthStore, type User } from "../stores/auth.js";
+import { formatDateTime } from "../utils/format.js";
+
+interface LoginDevice {
+  id: string;
+  status: "ACTIVE" | "LOGGED_OUT" | "COMPROMISED";
+  current: boolean;
+  userAgent: string | null;
+  signedInAt: string;
+  lastRotatedAt: string | null;
+  lastActiveAt: string;
+  revokedAt: string | null;
+  revokeReason: string | null;
+}
 
 const auth = useAuthStore();
 const form = reactive({ displayName: "", defaultInstrument: "", timezone: "Asia/Shanghai", locale: "zh-CN" });
@@ -9,6 +22,15 @@ const passwords = reactive({ currentPassword: "", newPassword: "", confirmPasswo
 const message = ref("");
 const error = ref("");
 const loading = ref(true);
+const devices = ref<LoginDevice[]>([]);
+const devicesError = ref("");
+const revokingId = ref<string | null>(null);
+
+const deviceStatusText: Record<LoginDevice["status"], string> = {
+  ACTIVE: "在线",
+  LOGGED_OUT: "已退出",
+  COMPROMISED: "已安全撤销",
+};
 
 async function load(): Promise<void> {
   try {
@@ -63,7 +85,40 @@ async function exportData(): Promise<void> {
   const result = await apiFetch<{ export: { id: string } }>("/api/v1/exports", { method: "POST", body: JSON.stringify({ format: "json" }) });
   message.value = `导出任务 ${result.export.id} 已创建，请稍后刷新状态。`;
 }
-onMounted(load);
+
+async function loadDevices(): Promise<void> {
+  devicesError.value = "";
+  try {
+    const result = await apiFetch<{ sessions: LoginDevice[] }>("/api/v1/auth/sessions");
+    devices.value = result.sessions;
+  } catch (reason) {
+    devicesError.value = reason instanceof ApiError ? reason.message : "登录设备加载失败";
+  }
+}
+
+async function revokeDevice(device: LoginDevice): Promise<void> {
+  revokingId.value = device.id;
+  devicesError.value = "";
+  try {
+    await apiFetch(`/api/v1/auth/sessions/${device.id}`, { method: "DELETE" });
+    await loadDevices();
+    // 远程退出的正是当前设备：清理本地登录态
+    if (device.current) {
+      auth.logout().finally(() => {
+        window.location.href = "/login";
+      });
+    }
+  } catch (reason) {
+    devicesError.value = reason instanceof ApiError ? reason.message : "退出该设备失败";
+  } finally {
+    revokingId.value = null;
+  }
+}
+
+onMounted(() => {
+  void load();
+  void loadDevices();
+});
 </script>
 
 <template>
@@ -91,6 +146,35 @@ onMounted(load);
         <div class="row end"><button class="button secondary" type="submit">修改密码</button></div>
       </form>
 
+      <article class="card stack">
+        <h2>登录设备</h2>
+        <p class="muted">每次登录是独立的会话族；退出某个设备或检测到令牌重放时只影响该登录，不会波及其他设备。</p>
+        <div v-if="devicesError" class="alert" style="margin-bottom: 12px">{{ devicesError }}</div>
+        <ul v-if="devices.length" class="device-list">
+          <li v-for="device in devices" :key="device.id" class="device-item">
+            <div class="device-meta">
+              <strong>
+                {{ device.userAgent || "未知设备" }}
+                <span v-if="device.current" class="badge">当前设备</span>
+              </strong>
+              <span class="muted">最近活动：{{ formatDateTime(device.lastActiveAt) }}</span>
+              <span class="muted">
+                状态：{{ deviceStatusText[device.status] }}<template v-if="device.status === 'COMPROMISED'">（检测到令牌重放）</template>
+              </span>
+            </div>
+            <button
+              v-if="device.status === 'ACTIVE'"
+              class="button secondary"
+              type="button"
+              :disabled="revokingId === device.id"
+              @click="revokeDevice(device)"
+            >
+              {{ revokingId === device.id ? "退出中…" : "退出此设备" }}
+            </button>
+          </li>
+        </ul>
+        <p v-else class="muted">暂无可显示的登录设备。</p>
+      </article>
       <article class="card stack">
         <h2>数据导出</h2>
         <p class="muted">导出会包含练习、音频元数据、标记、目标和进度，不包含音频二进制。</p>
